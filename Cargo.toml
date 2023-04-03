@@ -11,4 +11,8 @@ path = "./cli/main.rs"
 name = "rsqloth_core"
 path = "./core/core.rs"
 
+[dependencies]
+regex = "1.7.1"
+sqlparser = "0.32.0"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
