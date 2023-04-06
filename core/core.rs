@@ -5,19 +5,18 @@ use regex::Regex;
 use sqlparser::ast::{Ident, ObjectName, SetExpr, Values};
 use sqlparser::{ast::Statement, dialect::MySqlDialect, parser::Parser};
 
-pub fn format_insert_queries(sql: &str) -> Result<String, Error> {
+pub fn format_insert_queries(sql: &str) -> Result<String, Box<dyn std::error::Error>> {
     let dialect = MySqlDialect {};
-    let ast = Parser::parse_sql(&dialect, sql).unwrap();
+    let ast = Parser::parse_sql(&dialect, sql)?;
 
     if !is_insert_only(&ast) {
-        return Err(Error::new(
+        return Err(Box::new(Error::new(
             ErrorKind::InvalidInput,
-            "don't input queries other than INSERT",
-        ));
+            "can't format queries other than INSERT",
+        )));
     }
 
-    // TODO: コメントどうするか検討
-    let _comment_map = extract_comments(sql);
+    let comment_map = extract_comments(sql);
 
     let mut formatted_queries: Vec<String> = Vec::new();
     for query in ast.iter() {
@@ -45,7 +44,25 @@ pub fn format_insert_queries(sql: &str) -> Result<String, Error> {
         }
     }
 
-    return Ok(formatted_queries.concat());
+    // comment_map has keys one more than the # of queries
+    let mut result = String::from("");
+    for i in 0..comment_map.len() {
+        let comments = comment_map.get(&i).unwrap();
+        for (j, comment) in comments.iter().enumerate() {
+            result = result
+                + comment
+                + (if j == comments.len() - 1 {
+                    "\n\n"
+                } else {
+                    "\n"
+                });
+        }
+        if i < formatted_queries.len() {
+            result = result + &formatted_queries[i];
+        }
+    }
+
+    return Ok(result);
 }
 
 fn is_insert_only(ast: &Vec<Statement>) -> bool {
@@ -70,11 +87,23 @@ fn is_insert_only(ast: &Vec<Statement>) -> bool {
     return true;
 }
 
-fn extract_comments(sql_with_comment: &str) -> HashMap<usize, String> {
-    let mut comment_map: HashMap<usize, String> = HashMap::new();
-    let re = Regex::new(r"--.*$").unwrap();
-    for (i, comment) in re.captures_iter(sql_with_comment).enumerate() {
-        comment_map.insert(i, String::from(&comment[0]));
+fn extract_comments(sql_with_comment: &str) -> HashMap<usize, Vec<String>> {
+    let re = Regex::new(r"(--.*)|(INSERT INTO)").unwrap();
+
+    let mut query_index: usize = 0;
+    let mut comment_map: HashMap<usize, Vec<String>> = HashMap::new();
+    comment_map.insert(query_index, Vec::new());
+
+    for comment in re.captures_iter(sql_with_comment) {
+        if comment[0].starts_with("INSERT INTO") {
+            query_index += 1;
+            comment_map.insert(query_index, Vec::new());
+        } else {
+            comment_map
+                .get_mut(&query_index)
+                .unwrap()
+                .push(String::from(&comment[0]));
+        }
     }
     return comment_map;
 }
@@ -121,8 +150,6 @@ fn generate_formatted_query(
     values: &Values,
     max_char_length_vec: &Vec<usize>,
 ) -> String {
-    // コンマを検知してそれが何番目か数えてスペースをそこに付け加える作戦は、text型データにコンマが入っていた瞬間死ぬのでやめる
-    // 愚直に構築していく
     let table_name_part: String = String::from("INSERT INTO ") + &table_name.to_string() + "\n";
 
     let mut column_name_part: String = String::from("(");
