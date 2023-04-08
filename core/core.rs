@@ -46,9 +46,8 @@ pub fn format_insert_queries(sql: &str) -> Result<String, Box<dyn std::error::Er
         .collect::<Vec<String>>();
 
     formatted_queries.push(String::from(""));
-
-    //   ^^ add an extra to formatted queries in order to zip with comment vec
-    //      that has elements one more than the # of formatted queries.
+    // add an extra to formatted queries in order to zip with comment vec
+    // that has elements one more than the # of formatted queries.
 
     let result = comments_grouped_by_query
         .iter()
@@ -96,6 +95,7 @@ fn is_insert_only(ast: &Vec<Statement>) -> bool {
     return true;
 }
 
+// TODO: make it functional
 fn extract_comments(sql_with_comment: &str) -> Vec<Vec<String>> {
     let re = Regex::new(r"(--.*)|(INSERT INTO)").unwrap();
 
@@ -113,6 +113,7 @@ fn extract_comments(sql_with_comment: &str) -> Vec<Vec<String>> {
     return comment_map;
 }
 
+// TODO: make it functional
 fn get_max_char_length_vec(columns: &Vec<Ident>, values: &Values) -> Vec<usize> {
     let char_length_matrix = get_char_length_matrix(columns, values);
     let mut max_char_length_vec: Vec<usize> = Vec::new();
@@ -128,28 +129,31 @@ fn get_max_char_length_vec(columns: &Vec<Ident>, values: &Values) -> Vec<usize> 
     return max_char_length_vec;
 }
 
+// TODO: make it functional
 fn get_char_length_matrix(columns: &Vec<Ident>, values: &Values) -> Vec<Vec<usize>> {
-    let mut char_length_matrix: Vec<Vec<usize>> = Vec::new();
+    let char_length_matrix = columns
+        .iter()
+        .map(|column| {
+            return column.to_string().len();
+        })
+        .collect::<Vec<usize>>();
 
-    // length of column name
-    let mut char_length_vec: Vec<usize> = Vec::new();
-    for column in columns {
-        char_length_vec.push(column.to_string().len());
-    }
-    char_length_matrix.push(char_length_vec);
+    let mut a = values
+        .rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|value| value.to_string().len())
+                .collect::<Vec<usize>>()
+        })
+        .collect::<Vec<Vec<usize>>>();
 
-    // length of value
-    for row in values.rows.iter() {
-        let mut char_length_vec: Vec<usize> = Vec::new();
-        for value in row {
-            char_length_vec.push(value.to_string().len())
-        }
-        char_length_matrix.push(char_length_vec);
-    }
+    a.insert(0, char_length_matrix);
 
-    return char_length_matrix;
+    return a;
 }
 
+// TODO: make it functional
 // construct formatted query from scratch by using ast data
 fn generate_formatted_query(
     table_name: &ObjectName,
