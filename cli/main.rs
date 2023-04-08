@@ -1,5 +1,12 @@
 use rsqloth_core::format_insert_queries;
-use std::{env, fs::OpenOptions, io::Read, process, str::FromStr};
+use std::{
+    env,
+    error::Error,
+    fs::OpenOptions,
+    io::{Read, Write},
+    process,
+    str::FromStr,
+};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 
@@ -14,32 +21,24 @@ fn main() {
 
     match Commands::from_str(&args[1]) {
         Ok(Commands::FmtInserts) => {
-            let path = &args[2];
-
-            let mut f = OpenOptions::new()
-                .read(true)
-                .open(path)
-                .unwrap_or_else(|err| {
-                    eprintln!("failed to open the file. error: {err}");
-                    process::exit(1);
-                });
-
-            let mut sql = String::new();
-            f.read_to_string(&mut sql).unwrap_or_else(|err| {
-                eprintln!("failed to read the file. error: {err}");
+            let mut failed_paths: Vec<&str> = Vec::new();
+            for path in args.iter().skip(2) {
+                if let Err(err) = fmt_inserts(path) {
+                    println!("failed to format the file: {path}\nerror: {err}\n");
+                    failed_paths.push(path);
+                    continue;
+                }
+                println!("succeeded to format the file: {path}\n");
+            }
+            if failed_paths.len() > 0 {
+                println!(
+                    "result\n👻 failed to format the following files: {}",
+                    failed_paths.join(", ")
+                );
                 process::exit(1);
-            });
-
-            let res = format_insert_queries(&sql);
-            match res {
-                Ok(res) => {
-                    println!("{res}");
-                    process::exit(0);
-                }
-                Err(err) => {
-                    eprintln!("failed to format. error: {err}");
-                    process::exit(1);
-                }
+            } else {
+                println!("result\n🎉 succeeded to format all the files!!");
+                process::exit(0);
             }
         }
         _ => {
@@ -47,10 +46,23 @@ fn main() {
                 .map(|command| command.to_string())
                 .collect::<Vec<_>>();
             eprintln!(
-                "only the following commands are available: {:?}",
-                available_commands
+                "👾only the following commands are available: {}",
+                available_commands.join(",")
             );
             process::exit(1);
         }
     }
+}
+
+fn fmt_inserts(path: &str) -> Result<(), Box<dyn Error>> {
+    let mut f = OpenOptions::new().read(true).open(path)?;
+    let mut sql = String::new();
+    f.read_to_string(&mut sql)?;
+
+    let formatted_queries = format_insert_queries(&sql)?;
+
+    let mut f = OpenOptions::new().truncate(true).write(true).open(path)?;
+    f.write(formatted_queries.as_bytes())?;
+
+    return Ok(());
 }
