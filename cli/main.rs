@@ -44,7 +44,7 @@ fn main() {
         _ => {
             let available_commands = Commands::iter()
                 .map(|command| command.to_string())
-                .collect::<Vec<_>>();
+                .collect::<Vec<String>>();
             eprintln!(
                 "👾only the following commands are available: {}",
                 available_commands.join(",")
