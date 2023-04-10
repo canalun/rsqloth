@@ -1,5 +1,6 @@
 use std::io::{Error, ErrorKind};
 
+use itertools::Itertools;
 use regex::Regex;
 use sqlparser::ast::{Ident, ObjectName, SetExpr, Values};
 use sqlparser::{ast::Statement, dialect::MySqlDialect, parser::Parser};
@@ -15,7 +16,7 @@ pub fn format_insert_queries(sql: &str) -> Result<String, Box<dyn std::error::Er
         )));
     }
 
-    let comments_grouped_by_query = extract_comments(sql);
+    let comment_and_query_map = generate_comment_and_query_map(sql);
 
     let mut formatted_queries = ast
         .iter()
@@ -45,26 +46,14 @@ pub fn format_insert_queries(sql: &str) -> Result<String, Box<dyn std::error::Er
         })
         .collect::<Vec<String>>();
 
-    formatted_queries.push(String::from(""));
-    // add an extra to formatted queries in order to zip with comment vec
-    // that has elements one more than the # of formatted queries.
-
-    let result = comments_grouped_by_query
-        .iter()
-        .map(|comment_of_query| {
-            comment_of_query.iter().enumerate().map(|(i, comment)| {
-                if i == comment_of_query.len() - 1 {
-                    return String::from(comment) + "\n\n";
-                } else {
-                    return String::from(comment) + "\n";
-                }
-            })
-        })
-        .zip(formatted_queries.iter())
-        .map(|(comment_of_query, query)| {
-            let mut query_with_comments = comment_of_query.collect::<Vec<String>>();
-            query_with_comments.push(query.clone());
-            return query_with_comments;
+    let result = comment_and_query_map
+        .into_iter()
+        .map(|comment_and_query| {
+            if comment_and_query[0].starts_with("INSERT INTO") {
+                return vec![formatted_queries.remove(0)];
+            } else {
+                return comment_and_query;
+            }
         })
         .flatten()
         .collect::<Vec<String>>()
@@ -74,83 +63,82 @@ pub fn format_insert_queries(sql: &str) -> Result<String, Box<dyn std::error::Er
 }
 
 fn is_insert_only(ast: &Vec<Statement>) -> bool {
-    for query in ast {
-        match query {
-            Statement::Insert {
-                or: _,
-                into: _,
-                table_name: _,
-                columns: _,
-                overwrite: _,
-                source: _,
-                partitioned: _,
-                after_columns: _,
-                table: _,
-                on: _,
-                returning: _,
-            } => (),
-            _ => return false,
-        }
-    }
-    return true;
+    return ast.iter().fold(true, |a, query| match query {
+        Statement::Insert {
+            or: _,
+            into: _,
+            table_name: _,
+            columns: _,
+            overwrite: _,
+            source: _,
+            partitioned: _,
+            after_columns: _,
+            table: _,
+            on: _,
+            returning: _,
+        } => return a && true,
+        _ => return a && false,
+    });
 }
 
-// TODO: make it functional
-fn extract_comments(sql_with_comment: &str) -> Vec<Vec<String>> {
-    let re = Regex::new(r"(--.*)|(INSERT INTO)").unwrap();
-
-    let mut comment_map: Vec<Vec<String>> = vec![vec![]; 1];
-
-    let mut query_index: usize = 0;
-    for comment in re.captures_iter(sql_with_comment) {
-        if comment[0].starts_with("INSERT INTO") {
-            query_index += 1;
-            comment_map.push(vec![]);
-        } else {
-            comment_map[query_index].push(String::from(&comment[0]));
-        }
-    }
-    return comment_map;
+// this func returns a vec of comments grouped into vec by relative position against query.
+// i.e. [["XX", "XX"], ["INSERT INTO"], ["INSERT INTO"], ["XX", "XX", "XX"], ["INSERT INTO"]]
+fn generate_comment_and_query_map(sql_with_comment: &str) -> Vec<Vec<String>> {
+    return Regex::new(r"(--.*)|(INSERT INTO)")
+        .unwrap()
+        .captures_iter(sql_with_comment)
+        .group_by(|capture| capture[0].starts_with("INSERT INTO"))
+        .into_iter()
+        .map(|(_, a)| {
+            return a
+                .into_iter()
+                .map(|capture| String::from(&capture[0]))
+                .collect::<Vec<String>>();
+        })
+        .collect::<Vec<Vec<String>>>();
 }
 
-// TODO: make it functional
 fn get_max_char_length_vec(columns: &Vec<Ident>, values: &Values) -> Vec<usize> {
-    let char_length_matrix = get_char_length_matrix(columns, values);
-    let mut max_char_length_vec: Vec<usize> = Vec::new();
-    for column in 0..(char_length_matrix[0].len()) {
-        let mut max_char_length = 0;
-        for row in 0..(char_length_matrix.len()) {
-            if max_char_length < char_length_matrix[row][column] {
-                max_char_length = char_length_matrix[row][column];
-            }
-        }
-        max_char_length_vec.push(max_char_length);
-    }
-    return max_char_length_vec;
+    return get_char_length_matrix(columns, values)
+        .iter()
+        .fold(
+            vec![vec![0 as usize; 0]; columns.len()],
+            |mut transposed_matrix, char_length_of_row| {
+                char_length_of_row
+                    .iter()
+                    .enumerate()
+                    .for_each(|(column_index, char_length)| {
+                        transposed_matrix[column_index].push(*char_length)
+                    });
+                return transposed_matrix;
+            },
+        )
+        .iter()
+        .map(|char_length_of_column| {
+            return char_length_of_column
+                .into_iter()
+                .max()
+                .unwrap_or(&(0 as usize))
+                .clone();
+        })
+        .collect::<Vec<usize>>();
 }
 
-// TODO: make it functional
 fn get_char_length_matrix(columns: &Vec<Ident>, values: &Values) -> Vec<Vec<usize>> {
-    let char_length_matrix = columns
+    return columns
         .iter()
         .map(|column| {
             return column.to_string().len();
         })
-        .collect::<Vec<usize>>();
-
-    let mut a = values
-        .rows
-        .iter()
-        .map(|row| {
+        .collect::<Vec<usize>>()
+        .chunks(columns.len())
+        .map(|chunk| chunk.to_vec())
+        .chain(values.rows.iter().map(|row| {
             row.iter()
                 .map(|value| value.to_string().len())
                 .collect::<Vec<usize>>()
-        })
+        }))
         .collect::<Vec<Vec<usize>>>();
-
-    a.insert(0, char_length_matrix);
-
-    return a;
 }
 
 // TODO: make it functional
@@ -191,7 +179,7 @@ fn generate_formatted_query(
         if row_index != values.rows.len() - 1 {
             rows_part += ",\n"
         } else {
-            rows_part += ";\n\n"
+            rows_part += ";"
         }
     }
 
