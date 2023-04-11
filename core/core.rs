@@ -81,7 +81,8 @@ fn is_insert_only(ast: &Vec<Statement>) -> bool {
     });
 }
 
-// this func returns a vec of comments grouped into vec by relative position against query.
+// this func returns a two-dimensional vec of queries and comments.
+// comments grouped into vec by relative position against query.
 // i.e. [["XX", "XX"], ["INSERT INTO"], ["INSERT INTO"], ["XX", "XX", "XX"], ["INSERT INTO"]]
 fn generate_comment_and_query_map(sql_with_comment: &str) -> Vec<Vec<String>> {
     return Regex::new(r"(--.*)|(INSERT INTO)")
